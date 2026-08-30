@@ -7,8 +7,21 @@
 // Same idea as Java's public static final constants.
 
 export const DEPTH = {
-  QUICK: 12,
-  DEEP: 18,
+  QUICK: 8,
+  DEEP: 12,
+};
+
+export const PLATFORMS = {
+  chesscom: {
+    key: "chesscom",
+    label: "Chess.com",
+    example: "Hikaru",
+  },
+  lichess: {
+    key: "lichess",
+    label: "Lichess",
+    example: "DrNykterstein",
+  },
 };
 
 export const POLLING_INTERVAL_MS = 5000; // 5 seconds between job status checks

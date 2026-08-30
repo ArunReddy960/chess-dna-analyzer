@@ -13,7 +13,7 @@
 
 ## What It Does
 
-KnightLens fetches a player's recent games from Lichess, runs every move through a Stockfish engine pool in parallel, classifies mistakes by game phase, and generates a personalized **Chess DNA report** — including a player archetype, GM comparison, and AI coaching report.
+KnightLens fetches a player's recent games from **Chess.com or Lichess**, normalizes both providers into one game model, evaluates the player's moves through a Stockfish engine pool, and generates a personalized **Chess DNA report** — including a player archetype, GM comparison, and AI coaching report.
 
 Most chess tools explain individual moves. KnightLens models the **player** — aggregating patterns across 10–20 games to answer: *where do you consistently lose advantage?*
 
@@ -28,7 +28,9 @@ Browser (React + Vite)
         
 Spring Boot Backend (Java 17)
         ↓
-LichessService          → fetches PGN game history (public API)
+ChessPlatformRegistry   → routes to Chess.com or Lichess provider
+        ↓
+Canonical ChessGame     → PGN + source URL + platform + player color
         ↓
 Chesspresso              → parses PGN into per-move FEN positions
         ↓
@@ -39,7 +41,9 @@ StockfishService         → parallel engine analysis
   │  evaluated in parallel across pool              │
   └─────────────────────────────────────────────────┘
         ↓
-PatternAnalysisService   → aggregates centipawn loss by phase
+GameAnalysisCache        → reuses analysis by game/depth/engine version
+        ↓
+PatternAnalysisService   → aggregates the requested player's moves by phase
         ↓
 ClaudeService            → generates Chess DNA personality + coaching report
         ↓
@@ -88,6 +92,17 @@ Every analysis produces a structured personality profile:
 ---
 
 ## Key Engineering Decisions
+
+### Multi-Platform Provider Layer
+`ChessPlatformService` defines a provider contract implemented by `ChessComService` and `LichessService`. A registry selects the provider at runtime, while both implementations return the same `ChessGame` record. PGN parsing, Stockfish evaluation, pattern analysis, and AI coaching therefore remain independent of the upstream platform.
+
+The Chess.com client walks monthly archives newest-first and makes archive requests serially to respect PubAPI behavior. It sends a descriptive `User-Agent`, retries `429` and server errors with exponential backoff, honors `Retry-After`, and revalidates cached responses with `ETag` and `Last-Modified`.
+
+### Color-Correct, Player-Only Evaluation
+Stockfish scores are normalized to White's perspective, but centipawn loss must still be calculated differently for a White move and a Black move. KnightLens reads the requested player's color from each PGN, filters out the opponent's moves, and applies color-aware loss calculation before classification. This prevents Black mistakes from appearing as negative-loss `BEST` moves and keeps opponent decisions out of the player's profile.
+
+### Content-Addressed Analysis Cache
+Completed per-game engine results are stored in PostgreSQL under a SHA-256 key derived from platform, game ID, player color, search depth, and engine cache version. Repeat analyses skip Stockfish work for matching games while a version field makes cache invalidation explicit when engine behavior changes.
 
 ### Stockfish Process Pool
 Stockfish is a native binary — spawning a new process per move costs ~200ms startup overhead. Instead, a `BlockingQueue<StockfishEngine>` pre-warms N engine processes at startup and manages them as a pool (borrow → use → return), cutting per-move overhead to near-zero.
@@ -184,8 +199,8 @@ job.setCoachingReport(objectMapper.writeValueAsString(root.path("report")));
 
 ### Start Analysis
 ```
-POST /api/games/{username}/analyze-quick?gameCount=5   → depth 12, faster
-POST /api/games/{username}/analyze-deep?gameCount=5    → depth 18, more accurate
+POST /api/games/{username}/analyze-quick?gameCount=5&platform=chesscom  → depth 8
+POST /api/games/{username}/analyze-deep?gameCount=5&platform=lichess    → depth 12
 ```
 Returns job ID immediately (~615ms).
 
@@ -193,15 +208,19 @@ Returns job ID immediately (~615ms).
 ```
 GET /api/games/jobs/{jobId}
 ```
-Returns `PENDING` → `IN_PROGRESS` → `COMPLETED` with full results.
+Returns `PENDING` → `IN_PROGRESS` → `COMPLETED` with `stage`, `completedGames`, and `cacheHits` progress fields.
 
 ### Completed Response
 ```json
 {
   "id": 42,
   "username": "DrNykterstein",
+  "platform": "lichess",
   "status": "COMPLETED",
+  "stage": "COMPLETED",
   "depth": 12,
+  "completedGames": 10,
+  "cacheHits": 7,
   "personalityJson": "{\"archetype\":\"The Opening Maestro\", ...}",
   "coachingReport": "{\"overallAssessment\":\"...\", ...}",
   "resultJson": "[{\"phaseName\":\"opening\",\"accuracyPercentage\":96.0,...}]",
@@ -216,7 +235,7 @@ Returns `PENDING` → `IN_PROGRESS` → `COMPLETED` with full results.
 
 | Quality | Centipawn Loss | Meaning |
 |---------|---------------|---------|
-| Best | ≤ 10 cp (incl. negative) | Engine-level move |
+| Best | ≤ 10 cp | Engine-level move |
 | Excellent | 11–25 cp | Strong move |
 | Good | 26–50 cp | Solid move |
 | Inaccuracy | 51–100 cp | Minor error |
@@ -230,8 +249,7 @@ Returns `PENDING` → `IN_PROGRESS` → `COMPLETED` with full results.
 | Metric | Value |
 |--------|-------|
 | POST response time | ~615ms (async) |
-| 5 games, depth 12 | ~2 minutes |
-| 5 games, depth 18 | ~4 minutes |
+| Repeat game at same depth/version | Stockfish result loaded from PostgreSQL |
 | Single game (136 moves) | ~15s (was 85s before pool) |
 | Speedup from parallelism | ~5.6x |
 
@@ -241,14 +259,14 @@ Returns `PENDING` → `IN_PROGRESS` → `COMPLETED` with full results.
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 18, Vite |
+| Frontend | React 19, Vite |
 | Backend | Java 17, Spring Boot 3.5, Gradle |
 | Database | PostgreSQL (Render) |
 | ORM | Spring Data JPA / Hibernate |
 | Chess Engine | Stockfish (subprocess, UCI protocol) |
 | PGN Parsing | Chesspresso |
 | AI Coaching | Anthropic Claude API |
-| Game Data | Lichess Public API |
+| Game Data | Chess.com Published Data API, Lichess API |
 | Async | Spring @Async, CompletableFuture, BlockingQueue |
 | Deployment | Vercel (frontend) + Render Docker (backend) |
 
@@ -289,13 +307,21 @@ npm run dev
 
 ---
 
-## Unit Tests (21 passing)
+## Automated Tests
 
 ```
-StockfishServiceTest (17 tests)
+StockfishServiceTest
   ✓ classifyMoveQuality — all 6 buckets + boundary values
   ✓ determinePhase — endgame conditions, opening/middlegame boundaries
   ✓ normalizeToWhitePerspective — white/black turn, negative values
+  ✓ color-aware centipawn loss for White and Black
+
+ChessComServiceTest
+  ✓ archive ingestion and player-color preservation
+  ✓ 429 retry behavior with Retry-After
+
+PgnGameParserTest
+  ✓ provider-neutral PGN splitting, metadata, and FEN extraction
 
 PatternAnalysisServiceTest (4 tests)
   ✓ Empty games → zero stats
@@ -322,8 +348,10 @@ Similar to: Ruslan Ponomariov
 
 ## Resume Bullet Points
 
-- Designed a chess player weakness detection engine aggregating Stockfish evaluations across 10–20 games to identify recurring patterns across opening, middlegame, and endgame phases; deployed full-stack at knightlens.vercel.app
+- Architected a provider-agnostic chess analytics pipeline integrating Chess.com and Lichess through a Strategy-based registry and canonical game model, enabling multi-platform Stockfish analysis without duplicating downstream processing
 - Built a Stockfish process pool (BlockingQueue, N pre-warmed UCI processes) eliminating ~200ms per-position startup overhead; combined with CompletableFuture.supplyAsync() for parallel move evaluation, reducing analysis from 85s → 15s (5.6x speedup)
 - Implemented async job orchestration (@Async, @EnableAsync) with PostgreSQL job tracking — HTTP responses return in ~615ms while Stockfish analysis runs in background; clients poll /jobs/{id} for status
-- Diagnosed and fixed a Stockfish perspective normalization defect causing fictional 1000+ centipawn blunders; developed board-state phase classification and integrated Claude AI to generate structured Chess DNA personality profiles and plain-English coaching reports
-- Built React frontend (Vite) with live job polling, chess piece animations, rotating chess facts during analysis, and instant Lichess username validation; deployed on Vercel with auto-deploy on git push
+- Engineered a rate-limit-aware Chess.com client with newest-first archive pagination, conditional HTTP caching, `Retry-After` support, and exponential backoff for 429/5xx responses
+- Implemented content-addressed PostgreSQL caching keyed by platform, game, player color, search depth, and engine version, eliminating repeat Stockfish evaluation for cache hits
+- Corrected color-aware centipawn-loss calculations and restricted aggregation to player-owned moves, preventing Black-side scoring inversion and opponent-move contamination
+- Built a React 19 interface with platform selection, persisted job history, stage-level progress, cache-hit visibility, and live polling; added GitHub Actions CI for backend tests and frontend build/lint verification

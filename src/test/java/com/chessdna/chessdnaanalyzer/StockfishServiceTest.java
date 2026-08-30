@@ -118,4 +118,28 @@ class StockfishServiceTest {
         String fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
         assertEquals(30, stockfishService.normalizeToWhitePerspective(-30, fen));
     }
+
+    @Test
+    void centipawnLoss_whiteMove_usesEvaluationDrop() {
+        assertEquals(80, stockfishService.calculateCentipawnLoss(120, 40, PlayerColor.WHITE));
+    }
+
+    @Test
+    void centipawnLoss_blackMove_usesEvaluationIncrease() {
+        assertEquals(220, stockfishService.calculateCentipawnLoss(-50, 170, PlayerColor.BLACK));
+    }
+
+    @Test
+    void centipawnLoss_betterMove_clampsNegativeNoiseToZero() {
+        assertEquals(0, stockfishService.calculateCentipawnLoss(20, 80, PlayerColor.WHITE));
+        assertEquals(0, stockfishService.calculateCentipawnLoss(80, 20, PlayerColor.BLACK));
+    }
+
+    @Test
+    void sideToMove_readsBothColorsFromFen() {
+        assertEquals(PlayerColor.WHITE, stockfishService.sideToMove(
+                "8/8/8/8/8/8/8/8 w - - 0 1"));
+        assertEquals(PlayerColor.BLACK, stockfishService.sideToMove(
+                "8/8/8/8/8/8/8/8 b - - 0 1"));
+    }
 }

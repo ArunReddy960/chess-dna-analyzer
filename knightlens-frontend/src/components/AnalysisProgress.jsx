@@ -35,11 +35,20 @@ const STATUS_COLORS = {
   FAILED: "red",
 };
 
+const STAGE_LABELS = {
+  QUEUED: "Waiting for an analysis worker...",
+  FETCHING_GAMES: "Fetching recent games...",
+  ANALYZING: "Stockfish is evaluating your moves...",
+  GENERATING_REPORT: "Generating your Chess DNA coaching report...",
+  COMPLETED: "Analysis complete",
+  FAILED: "Analysis failed",
+};
+
 // ── Chess pieces for the animated board ────────────────────────────────────
 const PIECES = ["♔", "♕", "♖", "♗", "♘", "♙", "♚", "♛", "♜", "♝", "♞", "♟"];
 
 export default function AnalysisProgress({
-                                           username, mode, depth, gameCount, jobId, status, elapsed,
+                                           username, platform, mode, depth, gameCount, jobId, status, elapsed, progress,
                                          }) {
   const [factIndex, setFactIndex] = useState(0);
   const [fadeIn, setFadeIn] = useState(true);
@@ -69,6 +78,12 @@ export default function AnalysisProgress({
           ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
           : `${elapsed}s`
       : null;
+  const platformLabel = platform === "chesscom" ? "Chess.com" : "Lichess";
+  const completedGames = progress?.completedGames || 0;
+  const progressPercent = progress?.stage === "GENERATING_REPORT"
+      ? 95
+      : Math.min(90, Math.round((completedGames / Math.max(1, gameCount)) * 90));
+  const stageLabel = STAGE_LABELS[progress?.stage] || currentStage.label;
 
   return (
       <div style={{
@@ -140,6 +155,7 @@ export default function AnalysisProgress({
             </Badge>
             <Badge variant="neutral">depth {depth}</Badge>
             <Badge variant="neutral">{gameCount} games</Badge>
+            <Badge variant="neutral">{platformLabel}</Badge>
             <Badge variant={STATUS_COLORS[status] || "neutral"}>{status}</Badge>
           </div>
         </div>
@@ -152,10 +168,19 @@ export default function AnalysisProgress({
           overflow: "hidden",
           marginBottom: 12,
         }}>
-          {isActive && (
+          {isActive && progress?.stage === "ANALYZING" && (
               <div style={{
                 height: "100%",
-                width: "40%",
+                width: `${progressPercent}%`,
+                background: "linear-gradient(90deg, #8b6f2e, #c9a84c)",
+                borderRadius: 2,
+                transition: "width 0.4s ease",
+              }} />
+          )}
+          {isActive && progress?.stage !== "ANALYZING" && (
+              <div style={{
+                height: "100%",
+                width: progress?.stage === "GENERATING_REPORT" ? "95%" : "40%",
                 background: "linear-gradient(90deg, transparent, #c9a84c, transparent)",
                 borderRadius: 2,
                 animation: "indeterminate 1.8s ease-in-out infinite",
@@ -175,7 +200,12 @@ export default function AnalysisProgress({
           minHeight: 20,
           fontStyle: "italic",
         }}>
-          {isActive ? currentStage.label : isPending ? "Waiting to start..." : status}
+          {isActive ? stageLabel : isPending ? "Waiting to start..." : status}
+          {progress?.stage === "ANALYZING" && (
+              <span style={{ color: "#8b949e", marginLeft: 8 }}>
+                ({completedGames}/{gameCount} games)
+              </span>
+          )}
           {elapsedDisplay && (
               <span style={{ color: "#8b949e", marginLeft: 8 }}>({elapsedDisplay})</span>
           )}
@@ -217,6 +247,7 @@ export default function AnalysisProgress({
           marginTop: 20,
         }}>
           Job #{jobId} · Polling every 5 seconds
+          {progress?.cacheHits > 0 && ` · ${progress.cacheHits} cached game${progress.cacheHits === 1 ? "" : "s"}`}
         </div>
 
         <style>{`

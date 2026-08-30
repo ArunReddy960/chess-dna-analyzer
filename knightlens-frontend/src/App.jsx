@@ -50,13 +50,16 @@ export default function App() {
   console.log("Current view:", view);
 
   // ── FORM STATE (preserved across retries) ─────────────────────────────────
-  const [formValues, setFormValues] = useState({ username: "", gameCount: 10, mode: "quick" });
+  const [formValues, setFormValues] = useState({
+    username: "", gameCount: 10, mode: "quick", platform: "chesscom",
+  });
 
   // ── JOB STATE ─────────────────────────────────────────────────────────────
   const [jobId, setJobId] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
   const [jobDepth, setJobDepth] = useState(null);
   const [elapsed, setElapsed] = useState(0);
+  const [jobProgress, setJobProgress] = useState(null);
 
   // ── RESULT STATE ──────────────────────────────────────────────────────────
   const [phases, setPhases] = useState(null);
@@ -64,6 +67,7 @@ export default function App() {
   const [personalityJson, setPersonalityJson] = useState(null);
   const [resultUsername, setResultUsername] = useState("");
   const [resultDepth, setResultDepth] = useState(null);
+  const [resultPlatform, setResultPlatform] = useState("lichess");
 
   // ── UI STATE ──────────────────────────────────────────────────────────────
   const [loading, setLoading] = useState(false);   // true while POST is in flight
@@ -115,6 +119,7 @@ export default function App() {
         if (jobStatus === JOB_STATUS.COMPLETED) return;
 
         setJobStatus(data.status);
+        setJobProgress(data);
 
         if (data.status === JOB_STATUS.COMPLETED) {
           // Parse phase data safely — returns null if invalid
@@ -124,17 +129,18 @@ export default function App() {
           setPersonalityJson(data.personalityJson || null);
           setResultUsername(data.username || formValues.username);
           setResultDepth(data.depth);
+          setResultPlatform(data.platform || formValues.platform);
           setView(VIEWS.RESULT);
           // Add to history
           setHistory((h) => [data, ...h.filter((j) => j.id !== data.id)]);
         }
 
         if (data.status === JOB_STATUS.FAILED) {
-          setError("Analysis failed. Try a different username or fewer games.");
+          setError(data.errorMessage || "Analysis failed. Try a different username or fewer games.");
           setView(VIEWS.FORM);
         }
 
-      } catch (err) {
+      } catch {
         // IMPORTANT: A single network failure should NOT destroy a completed result.
         // We only show errors if we're still in the progress view.
         if (view === VIEWS.PROGRESS) {
@@ -155,7 +161,7 @@ export default function App() {
   }, [jobId, jobStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── SUBMIT HANDLER ────────────────────────────────────────────────────────
-  const handleSubmit = async (username, gameCount, mode) => {
+  const handleSubmit = async (username, gameCount, mode, platform) => {
     // Prevent duplicate submissions
     if (loading) return;
 
@@ -166,18 +172,20 @@ export default function App() {
     setJobId(null);
     setJobStatus(null);
     setElapsed(0);
+    setJobProgress(null);
     setLoading(true);
 
     // Preserve form values so Retry can restore them
-    setFormValues({ username, gameCount, mode });
+    setFormValues({ username, gameCount, mode, platform });
 
     try {
       const apiFn = mode === "quick" ? startQuickAnalysis : startDeepAnalysis;
-      const job = await apiFn(username, gameCount);
+      const job = await apiFn(username, gameCount, platform);
 
       setJobId(job.id);
       setJobStatus(job.status);
       setJobDepth(job.depth ?? (mode === "quick" ? DEPTH.QUICK : DEPTH.DEEP));
+      setJobProgress(job);
       setView(VIEWS.PROGRESS);
     } catch (err) {
       // Show the error but keep the form — don't navigate away
@@ -209,6 +217,7 @@ export default function App() {
     // IMPORTANT: use the job's own username/depth, not current form state
     setResultUsername(job.username || "Player");
     setResultDepth(job.depth);
+    setResultPlatform(job.platform || "lichess");
     setView(VIEWS.RESULT);
   };
 
@@ -275,12 +284,14 @@ export default function App() {
         {view === VIEWS.PROGRESS && (
           <AnalysisProgress
             username={formValues.username}
+            platform={formValues.platform}
             mode={depthToMode(jobDepth) || formValues.mode}
             depth={jobDepth}
             gameCount={formValues.gameCount}
             jobId={jobId}
             status={jobStatus}
             elapsed={elapsed}
+            progress={jobProgress}
           />
         )}
 
@@ -292,6 +303,7 @@ export default function App() {
                 report={report}
                 personalityJson={personalityJson}
                 depth={resultDepth}
+                platform={resultPlatform}
                 onNewAnalysis={() => setView(VIEWS.FORM)}
             />
         )}

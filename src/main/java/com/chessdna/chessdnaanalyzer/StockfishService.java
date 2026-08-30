@@ -22,6 +22,9 @@ public class StockfishService {
     @Value("${stockfish.pool-size:2}")
     private int POOL_SIZE;
 
+    @Value("${stockfish.cache-version:stockfish-v2-pgn-fix}")
+    private String cacheVersion;
+
     private BlockingQueue<StockfishEngine> enginePool;
 
     // Custom thread pool — POOL_SIZE * 2 threads ensures engines are never idle
@@ -61,6 +64,13 @@ public class StockfishService {
     }
 
     public List<AnalyzedMove> analyzeGame(List<String> fens, int depth) throws InterruptedException {
+        return analyzeGame(fens, depth, null);
+    }
+
+    public List<AnalyzedMove> analyzeGame(
+            List<String> fens,
+            int depth,
+            PlayerColor playerColor) throws InterruptedException {
 
         // ── PHASE 1: Evaluate ALL positions in PARALLEL using custom thread pool ──
         List<CompletableFuture<Integer>> futures = new ArrayList<>();
@@ -92,16 +102,55 @@ public class StockfishService {
         for (int i = 1; i < allEvaluations.size(); i++) {
             int previousEval = allEvaluations.get(i - 1);
             int currentEval = allEvaluations.get(i);
-            int cpLoss = previousEval - currentEval;
 
             String fenBeforeThisMove = allFens.get(i - 1);
-            String phase = determinePhase(fenBeforeThisMove, i);
+            PlayerColor mover = sideToMove(fenBeforeThisMove);
+            if (playerColor != null && mover != playerColor) {
+                continue;
+            }
+
+            int cpLoss = calculateCentipawnLoss(previousEval, currentEval, mover);
+            int fullMoveNumber = fullMoveNumber(fenBeforeThisMove, i);
+            String phase = determinePhase(fenBeforeThisMove, fullMoveNumber);
             String quality = classifyMoveQuality(cpLoss);
 
             results.add(new AnalyzedMove(i, cpLoss, phase, quality));
         }
 
         return results;
+    }
+
+    public int calculateCentipawnLoss(int previousWhiteEvaluation,
+                                      int currentWhiteEvaluation,
+                                      PlayerColor mover) {
+        int rawLoss = mover == PlayerColor.WHITE
+                ? previousWhiteEvaluation - currentWhiteEvaluation
+                : currentWhiteEvaluation - previousWhiteEvaluation;
+        return Math.max(0, rawLoss);
+    }
+
+    PlayerColor sideToMove(String fen) {
+        String[] fields = fen.split(" ");
+        if (fields.length < 2) {
+            throw new IllegalArgumentException("Invalid FEN: missing side to move");
+        }
+        return "w".equals(fields[1]) ? PlayerColor.WHITE : PlayerColor.BLACK;
+    }
+
+    private int fullMoveNumber(String fen, int fallbackPly) {
+        String[] fields = fen.split(" ");
+        if (fields.length > 5) {
+            try {
+                return Integer.parseInt(fields[5]);
+            } catch (NumberFormatException ignored) {
+                // Fall through to a safe value derived from the ply index.
+            }
+        }
+        return (fallbackPly + 1) / 2;
+    }
+
+    public String getCacheVersion() {
+        return cacheVersion;
     }
 
     public int normalizeToWhitePerspective(int evaluation, String fen) {

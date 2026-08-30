@@ -58,6 +58,7 @@ function JobRow({ job, onOpen }) {
         </Badge>
         <Badge variant="neutral">depth {job.depth ?? "–"}</Badge>
         <Badge variant="neutral">{job.gameCount ?? "–"} games</Badge>
+        <Badge variant="neutral">{job.platform === "chesscom" ? "Chess.com" : "Lichess"}</Badge>
       </div>
 
       {/* Status */}

@@ -25,7 +25,7 @@ async function apiFetch(url, options = {}) {
   let response;
   try {
     response = await fetch(url, options);
-  } catch (networkError) {
+  } catch {
     // fetch() itself throws only on network failure (server unreachable, DNS error)
     // NOT on HTTP error codes (404, 500) — those come back as response.ok = false
     throw new Error("Could not reach the server. Is your Spring Boot app running on port 8080?");
@@ -55,24 +55,24 @@ async function apiFetch(url, options = {}) {
 // ── PUBLIC API FUNCTIONS ──────────────────────────────────────────────────────
 
 /**
- * Start a quick analysis (depth 12) for a Lichess user.
+ * Start a quick analysis (depth 8) for a player on the selected platform.
  * Maps to: POST /api/games/{username}/analyze-quick?gameCount=N
  * Returns the AnalysisJob object with id, status, etc.
  */
-export async function startQuickAnalysis(username, gameCount) {
+export async function startQuickAnalysis(username, gameCount, platform = "lichess") {
   return apiFetch(
-    `${API_BASE_URL}/api/games/${encodeURIComponent(username)}/analyze-quick?gameCount=${gameCount}`,
+    `${API_BASE_URL}/api/games/${encodeURIComponent(username)}/analyze-quick?gameCount=${gameCount}&platform=${encodeURIComponent(platform)}`,
     { method: "POST" }
   );
 }
 
 /**
- * Start a deep analysis (depth 18) for a Lichess user.
+ * Start a deep analysis (depth 12) for a player on the selected platform.
  * Maps to: POST /api/games/{username}/analyze-deep?gameCount=N
  */
-export async function startDeepAnalysis(username, gameCount) {
+export async function startDeepAnalysis(username, gameCount, platform = "lichess") {
   return apiFetch(
-    `${API_BASE_URL}/api/games/${encodeURIComponent(username)}/analyze-deep?gameCount=${gameCount}`,
+    `${API_BASE_URL}/api/games/${encodeURIComponent(username)}/analyze-deep?gameCount=${gameCount}&platform=${encodeURIComponent(platform)}`,
     { method: "POST" }
   );
 }
@@ -114,10 +114,10 @@ export function parsePhaseStats(resultJson) {
 
 /**
  * Determine analysis mode label from depth integer.
- * depth 12 → "quick", depth 18 → "deep", anything else → "custom"
+ * depth 8 → "quick", depth 12 → "deep", anything else → "custom"
  */
 export function depthToMode(depth) {
-  if (depth === 12) return "quick";
-  if (depth === 18) return "deep";
+  if (depth === 8) return "quick";
+  if (depth === 12) return "deep";
   return "custom";
 }

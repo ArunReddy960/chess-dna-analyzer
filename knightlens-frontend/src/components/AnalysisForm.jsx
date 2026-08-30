@@ -13,7 +13,7 @@
 //   error        — string or null, error to display
 
 import { useState } from "react";
-import { ANALYSIS_MODES, GAME_COUNT } from "../constants/analysisConfig";
+import { ANALYSIS_MODES, GAME_COUNT, PLATFORMS } from "../constants/analysisConfig";
 import AnalysisModeCard from "./AnalysisModeCard";
 import ErrorAlert from "./ErrorAlert";
 
@@ -23,6 +23,7 @@ export default function AnalysisForm({ onSubmit, initialValues = {}, loading, er
     const [gameCountInput, setGameCountInput] = useState(String(initialValues.gameCount || GAME_COUNT.DEFAULT));
     const [gameCountError, setGameCountError] = useState("");
     const [mode, setMode] = useState(initialValues.mode || "quick");
+    const [platform, setPlatform] = useState(initialValues.platform || "chesscom");
 
     // ── GAME COUNT VALIDATION ─────────────────────────────────────────────────
     // WHY CLIENT-SIDE VALIDATION?
@@ -79,18 +80,7 @@ export default function AnalysisForm({ onSubmit, initialValues = {}, loading, er
     const handleSubmit = async () => {
         if (!isValid || loading) return;
 
-        // Quick username check before starting analysis
-        try {
-            const res = await fetch(`https://lichess.org/api/user/${username.trim()}`);
-            if (!res.ok) {
-                setGameCountError("Username not found on Lichess. Try a different username.");
-                return;
-            }
-        } catch {
-            // If Lichess unreachable, proceed anyway
-        }
-
-        onSubmit(username.trim(), gameCount, mode);
+        onSubmit(username.trim(), gameCount, mode, platform);
     };
 
     const modeConfig = ANALYSIS_MODES[mode];
@@ -113,23 +103,63 @@ export default function AnalysisForm({ onSubmit, initialValues = {}, loading, er
                     Analyze a player
                 </div>
 
+                {/* PLATFORM SELECTOR */}
+                <div style={{marginBottom: 18}}>
+                    <div
+                        id="platform-label"
+                        style={{display: "block", fontSize: 12, color: "#8b949e", marginBottom: 8, fontWeight: 500}}
+                    >
+                        Chess platform
+                    </div>
+                    <div
+                        role="radiogroup"
+                        aria-labelledby="platform-label"
+                        style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10}}
+                    >
+                        {Object.values(PLATFORMS).map((item) => {
+                            const selected = platform === item.key;
+                            return (
+                                <button
+                                    key={item.key}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    onClick={() => setPlatform(item.key)}
+                                    style={{
+                                        padding: "12px 16px",
+                                        borderRadius: "var(--radius-md)",
+                                        background: selected ? "#1f3a5f" : "#0d1117",
+                                        border: `1px solid ${selected ? "#58a6ff" : "#30363d"}`,
+                                        color: selected ? "#e6edf3" : "#8b949e",
+                                        cursor: "pointer",
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    {item.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
                 {/* USERNAME INPUT */}
                 <label
-                    htmlFor="lichess-username"
+                    htmlFor="player-username"
                     style={{display: "block", fontSize: 12, color: "#8b949e", marginBottom: 6, fontWeight: 500}}
                 >
-                    Lichess username
+                    {PLATFORMS[platform].label} username
                 </label>
                 <input
-                    id="lichess-username"
+                    id="player-username"
                     type="text"
-                    placeholder="e.g. DrNykterstein"
+                    placeholder={`e.g. ${PLATFORMS[platform].example}`}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
                     autoComplete="off"
                     spellCheck={false}
-                    aria-label="Lichess username"
+                    aria-label={`${PLATFORMS[platform].label} username`}
                     style={{
                         width: "100%",
                         background: "#0d1117",

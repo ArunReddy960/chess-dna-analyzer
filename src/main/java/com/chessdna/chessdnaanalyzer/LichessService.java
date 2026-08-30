@@ -1,84 +1,72 @@
 package com.chessdna.chessdnaanalyzer;
-import org.springframework.http.*;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import chesspresso.game.Game;
-import chesspresso.pgn.PGNReader;
-import chesspresso.position.Position;
-import java.io.StringReader;
-import java.util.ArrayList;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class LichessService implements ChessPlatformService {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private static final String API_URL = "https://lichess.org/api/games/user/";
+
+    private final RestTemplate restTemplate;
+    private final PgnGameParser pgnParser;
+
+    @Autowired
+    public LichessService(PgnGameParser pgnParser) {
+        this(new RestTemplate(), pgnParser);
+    }
+
+    LichessService(RestTemplate restTemplate, PgnGameParser pgnParser) {
+        this.restTemplate = restTemplate;
+        this.pgnParser = pgnParser;
+    }
 
     @Override
-    public List<String> fetchGames(String username, int gameCount) {
-        String url = "https://lichess.org/api/games/user/"
-                + username
-                + "?max=" + gameCount;
-                //+ "&perfType=rapid,classical";
+    public ChessPlatform platform() {
+        return ChessPlatform.LICHESS;
+    }
 
-        // Tell Lichess we want PGN format
+    @Override
+    public List<ChessGame> fetchGames(String username, int gameCount) {
+        validateRequest(username, gameCount);
+        String url = API_URL + username + "?max=" + gameCount;
+
         HttpHeaders headers = new HttpHeaders();
         headers.set("Accept", "application/x-chess-pgn");
 
-        HttpEntity<String> entity = new HttpEntity<>(headers);
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                url,
-                HttpMethod.GET,
-                entity,
-                String.class
-        );
-
-        String rawPgn = response.getBody();
-
-        if (rawPgn == null || rawPgn.isBlank()) {
-            return List.of(); // return empty list, don't crash
-        }
-
-        return parseGames(rawPgn);
-    }
-    private List<String> parseGames(String rawPgn) {
-        String[] games = rawPgn.split("\n\n\n");
-        return List.of(games);
-    }
-
-
-    public List<String> extractFensFromPgn(String pgnText) {
-        List<String> fens = new ArrayList<>();
-
         try {
-            PGNReader reader = new PGNReader(new StringReader(pgnText), "game");
-            Game game = reader.parseGame();
+            ResponseEntity<String> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
 
-            game.gotoStart();   // ✅ fixed — called on game, not position
-
-            while (game.hasNextMove()) {
-                game.goForward();
-                fens.add(game.getPosition().getFEN());  // also fixed — get FRESH position each time
+            List<ChessGame> games = new ArrayList<>();
+            for (String pgn : pgnParser.splitGames(response.getBody())) {
+                games.add(pgnParser.toGame(username, platform(), pgn, null));
             }
-
+            return games;
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new GameProviderException("Lichess username '" + username + "' was not found.", e);
+        } catch (GameProviderException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse PGN", e);
+            throw new GameProviderException("Could not retrieve games from Lichess. Please try again.", e);
         }
-
-        return fens;
     }
-    public List<List<String>> fetchGamesAsFens(String username, int gameCount) {
-        List<String> pgnGames = fetchGames(username, gameCount);
 
-        List<List<String>> allGamesFens = new ArrayList<>();
-
-        for (String pgn : pgnGames) {
-            List<String> fensForThisGame = extractFensFromPgn(pgn);
-            allGamesFens.add(fensForThisGame);
+    private void validateRequest(String username, int gameCount) {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username is required.");
         }
-
-        return allGamesFens;
+        if (gameCount < 1 || gameCount > 50) {
+            throw new IllegalArgumentException("Game count must be between 1 and 50.");
+        }
     }
 }

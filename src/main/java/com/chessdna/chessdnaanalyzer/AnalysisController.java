@@ -1,29 +1,39 @@
 package com.chessdna.chessdnaanalyzer;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
 import java.io.IOException;
-import java.util.List;
 import java.util.ArrayList;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/games")
 public class AnalysisController {
 
-    private final ChessPlatformService chessPlatformService;
+    private static final int QUICK_DEPTH = 8;
+    private static final int DEEP_DEPTH = 12;
+
+    private final ChessPlatformRegistry platformRegistry;
+    private final PgnGameParser pgnParser;
     private final StockfishService stockfishService;
     private final PatternAnalysisService patternAnalysisService;
     private final AnalysisJobService analysisJobService;
     private final AnalysisJobRepository jobRepository;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public AnalysisController(LichessService lichessService,
+    public AnalysisController(ChessPlatformRegistry platformRegistry,
+                              PgnGameParser pgnParser,
                               StockfishService stockfishService,
                               PatternAnalysisService patternAnalysisService,
                               AnalysisJobService analysisJobService,
                               AnalysisJobRepository jobRepository) {
-        this.chessPlatformService = lichessService;
+        this.platformRegistry = platformRegistry;
+        this.pgnParser = pgnParser;
         this.stockfishService = stockfishService;
         this.patternAnalysisService = patternAnalysisService;
         this.analysisJobService = analysisJobService;
@@ -31,88 +41,81 @@ public class AnalysisController {
     }
 
     @GetMapping("/{username}")
-    public List<String> getGames(
+    public List<ChessGame> getGames(
             @PathVariable String username,
-            @RequestParam(defaultValue = "10") int gameCount) {
-        return chessPlatformService.fetchGames(username, gameCount);
+            @RequestParam(defaultValue = "10") int gameCount,
+            @RequestParam(defaultValue = "lichess") String platform) {
+        ChessPlatform selectedPlatform = ChessPlatform.from(platform);
+        return platformRegistry.providerFor(selectedPlatform).fetchGames(username, gameCount);
     }
 
     @GetMapping("/{username}/fens")
     public List<List<String>> getGamesFens(
             @PathVariable String username,
-            @RequestParam(defaultValue = "2") int gameCount) {
-        return ((LichessService) chessPlatformService).fetchGamesAsFens(username, gameCount);
+            @RequestParam(defaultValue = "2") int gameCount,
+            @RequestParam(defaultValue = "lichess") String platform) {
+        List<ChessGame> games = platformRegistry.providerFor(ChessPlatform.from(platform))
+                .fetchGames(username, gameCount);
+        return games.stream().map(game -> pgnParser.extractFens(game.pgn())).toList();
     }
 
     @GetMapping("/bestmove")
     public String getBestMoveForFen(@RequestParam String fen) throws IOException, InterruptedException {
-        StockfishService.AnalysisResult result = stockfishService.analyzePosition(fen, 18);
-        return result.bestMove();
+        return stockfishService.analyzePosition(fen, DEEP_DEPTH).bestMove();
     }
 
     @GetMapping("/{username}/analyze")
     public List<List<StockfishService.AnalyzedMove>> analyzeGames(
             @PathVariable String username,
             @RequestParam(defaultValue = "1") int gameCount,
-            @RequestParam(defaultValue = "18") int depth) throws IOException, InterruptedException {
-
-        List<List<String>> allGamesFens = ((LichessService) chessPlatformService)
-                .fetchGamesAsFens(username, gameCount);
-
-        List<List<StockfishService.AnalyzedMove>> allGamesAnalysis = new ArrayList<>();
-
-        for (List<String> gameFens : allGamesFens) {
-            List<StockfishService.AnalyzedMove> analysis = stockfishService.analyzeGame(gameFens, depth);
-            allGamesAnalysis.add(analysis);
+            @RequestParam(defaultValue = "12") int depth,
+            @RequestParam(defaultValue = "lichess") String platform) throws InterruptedException {
+        List<ChessGame> games = platformRegistry.providerFor(ChessPlatform.from(platform))
+                .fetchGames(username, gameCount);
+        List<List<StockfishService.AnalyzedMove>> analyses = new ArrayList<>();
+        for (ChessGame game : games) {
+            analyses.add(stockfishService.analyzeGame(
+                    pgnParser.extractFens(game.pgn()), depth, game.playerColor()));
         }
-
-        return allGamesAnalysis;
+        return analyses;
     }
 
     @GetMapping("/{username}/patterns")
     public List<PatternAnalysisService.PhaseStats> analyzePatterns(
             @PathVariable String username,
             @RequestParam(defaultValue = "5") int gameCount,
-            @RequestParam(defaultValue = "18") int depth) throws InterruptedException {
-
-        List<List<String>> allGamesFens = ((LichessService) chessPlatformService)
-                .fetchGamesAsFens(username, gameCount);
-
-        List<List<StockfishService.AnalyzedMove>> allGamesAnalysis = new ArrayList<>();
-
-        for (List<String> gameFens : allGamesFens) {
-            List<StockfishService.AnalyzedMove> analysis = stockfishService.analyzeGame(gameFens, depth);
-            allGamesAnalysis.add(analysis);
-        }
-
-        return patternAnalysisService.analyzePatterns(allGamesAnalysis);
+            @RequestParam(defaultValue = "12") int depth,
+            @RequestParam(defaultValue = "lichess") String platform) throws InterruptedException {
+        return patternAnalysisService.analyzePatterns(
+                analyzeGames(username, gameCount, depth, platform));
     }
 
-    // ── NEW: Async endpoints ───────────────────────────────────────────
     @GetMapping("/jobs/{jobId}")
     public AnalysisJob getJobStatus(@PathVariable Long jobId) {
         return jobRepository.findById(jobId)
-                .orElseThrow(() -> new RuntimeException("Job not found: " + jobId));
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
     }
 
-    // Old endpoint — still calling startJob with old signature
     @PostMapping("/{username}/analyze-quick")
     public AnalysisJob quickAnalysis(
             @PathVariable String username,
-            @RequestParam(defaultValue = "10") int gameCount) {
-        return analysisJobService.startJob(username, gameCount, 8); // depth hardcoded to 12
+            @RequestParam(defaultValue = "10") int gameCount,
+            @RequestParam(defaultValue = "lichess") String platform) {
+        return analysisJobService.startJob(
+                username, gameCount, QUICK_DEPTH, ChessPlatform.from(platform));
     }
 
     @PostMapping("/{username}/analyze-deep")
     public AnalysisJob deepAnalysis(
             @PathVariable String username,
-            @RequestParam(defaultValue = "10") int gameCount) {
-        return analysisJobService.startJob(username, gameCount, 12); // depth hardcoded to 18
+            @RequestParam(defaultValue = "10") int gameCount,
+            @RequestParam(defaultValue = "lichess") String platform) {
+        return analysisJobService.startJob(
+                username, gameCount, DEEP_DEPTH, ChessPlatform.from(platform));
     }
+
     @GetMapping("/jobs/recent")
     public ResponseEntity<List<AnalysisJob>> getRecentJobs() {
-        return ResponseEntity.ok(
-                jobRepository.findTop10ByStatusOrderByUpdatedAtDesc("COMPLETED")
-        );
+        return ResponseEntity.ok(jobRepository.findTop10ByStatusOrderByUpdatedAtDesc("COMPLETED"));
     }
 }

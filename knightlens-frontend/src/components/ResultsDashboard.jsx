@@ -94,13 +94,14 @@ function ActionItem({ number, text }) {
 }
 
 export default function ResultsDashboard({
-                                             username, phases, report: rawReport, depth, personalityJson, onNewAnalysis,
+                                             username, platform, phases, report: rawReport, depth, personalityJson, onNewAnalysis,
                                          }) {
     const personality = parsePersonality(personalityJson);
     const report      = parseReport(rawReport);
     const modeLabel   = depthToMode(depth) === "quick" ? "Quick" : "Deep";
     const displayName = username || "Player";
     const riskStyle   = RISK_COLORS[personality?.riskLevel] || RISK_COLORS.Medium;
+    const platformLabel = platform === "chesscom" ? "Chess.com" : "Lichess";
 
     return (
         <div style={{ maxWidth: 760, margin: "0 auto" }}>
@@ -120,8 +121,9 @@ export default function ResultsDashboard({
                         <span style={{ color: "#c9a84c" }}> — {displayName}</span>
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <Badge variant={depth === 12 ? "neutral" : "blue"}>{modeLabel}</Badge>
+                        <Badge variant={modeLabel === "Quick" ? "neutral" : "blue"}>{modeLabel}</Badge>
                         <Badge variant="neutral">depth {depth}</Badge>
+                        <Badge variant="neutral">{platformLabel}</Badge>
                     </div>
                 </div>
                 <button onClick={onNewAnalysis} style={{
