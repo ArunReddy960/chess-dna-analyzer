@@ -67,4 +67,23 @@ class PgnGameParserTest {
 
         assertEquals(3, parser.extractFens(pgn).size());
     }
+
+    @Test
+    void extractFens_parsesChessComClockAnnotations() {
+        String pgn = """
+                [Event "Live Chess"]
+                [Site "Chess.com"]
+                [White "Arun"]
+                [Black "Opponent"]
+                [Result "1-0"]
+
+                1. d4 {[%clk 0:15:08.9]}
+                1... d5 {[%clk 0:15:08.8]}
+                2. Nf3 {[%clk 0:15:18.1]}
+                2... Nf6 {[%clk 0:15:14.4]}
+                3. e3 {[%clk 0:15:27.2]} 1-0
+                """;
+
+        assertEquals(5, parser.extractFens(pgn).size());
+    }
 }

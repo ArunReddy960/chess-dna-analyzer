@@ -2,6 +2,7 @@ package com.chessdna.chessdnaanalyzer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -34,6 +35,7 @@ public class ChessComService implements ChessPlatformService {
     private final Sleeper sleeper;
     private final Map<String, CachedResponse> responseCache = new ConcurrentHashMap<>();
 
+    @Autowired
     public ChessComService(
             ObjectMapper objectMapper,
             PgnGameParser pgnParser,

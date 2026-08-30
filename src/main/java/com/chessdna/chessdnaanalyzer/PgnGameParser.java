@@ -36,7 +36,15 @@ public class PgnGameParser {
     public List<String> extractFens(String pgnText) {
         List<String> fens = new ArrayList<>();
         try {
-            PGNReader reader = new PGNReader(new StringReader(pgnText), "game");
+            // Chess.com PGNs include clock/evaluation comments that Chesspresso can
+            // silently treat as the end of the main line. The analysis only needs
+            // moves, so remove comments and numeric annotation glyphs first.
+            String normalizedPgn = pgnText
+                    .replaceAll("\\{[^}]*}", " ")
+                    .replaceAll("(?m)^\\s*;.*$", " ")
+                    .replaceAll("\\$\\d+", " ");
+
+            PGNReader reader = new PGNReader(new StringReader(normalizedPgn), "game");
             Game game = reader.parseGame();
             game.gotoStart();
             while (game.hasNextMove()) {

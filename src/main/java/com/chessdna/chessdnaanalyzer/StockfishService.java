@@ -22,7 +22,7 @@ public class StockfishService {
     @Value("${stockfish.pool-size:2}")
     private int POOL_SIZE;
 
-    @Value("${stockfish.cache-version:stockfish-v1}")
+    @Value("${stockfish.cache-version:stockfish-v2-pgn-fix}")
     private String cacheVersion;
 
     private BlockingQueue<StockfishEngine> enginePool;

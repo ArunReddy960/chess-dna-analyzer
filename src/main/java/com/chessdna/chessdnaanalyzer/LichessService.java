@@ -1,5 +1,6 @@
 package com.chessdna.chessdnaanalyzer;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -19,6 +20,7 @@ public class LichessService implements ChessPlatformService {
     private final RestTemplate restTemplate;
     private final PgnGameParser pgnParser;
 
+    @Autowired
     public LichessService(PgnGameParser pgnParser) {
         this(new RestTemplate(), pgnParser);
     }

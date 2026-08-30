@@ -95,6 +95,11 @@ public class ClaudeService {
             }
             
             Important rules:
+            - Treat any phase with fewer than 10 total moves as insufficient evidence
+            - Never describe an insufficient-sample phase as a strength, weakness, proven skill, archetype, or playing-style trait
+            - Select the biggest strength and primary weakness only from phases with at least 10 moves
+            - Compare sufficient phases using average loss, accuracy, and serious-error frequency; do not contradict the supplied statistics
+            - If only one phase has enough moves, state that the other phases need more data instead of inventing conclusions
             - Never use centipawn, cp loss, or any technical chess engine terms in the report sections
             - Write the report like you're talking to a passionate amateur who wants to improve
             - Be specific — reference their actual patterns, not generic advice
